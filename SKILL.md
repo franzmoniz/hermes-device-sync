@@ -19,8 +19,12 @@ accounts and fallback chain everywhere (checked automatically), and a queue to l
 that is off. Optional: control one device from another over SSH (home network or Tailscale).
 Transport is a PRIVATE GitHub repo of the user. Syncing uses no model tokens.
 
-Start from ZERO: assume the user has no GitHub account, no git, no Tailscale, nothing linked.
-The user may not be technical: explain each thing you ask them to do in one plain sentence.
+Check first, never assume. Do not assume the user has anything (GitHub account, git, Tailscale, logins),
+and do not assume they have nothing either: CHECK each item on this device before acting, reuse what
+already exists, and install/create/log in ONLY what is missing. Never reinstall, re-create or re-login
+something that already works (no second repo, no second cron job, no duplicate profile block, no second
+GitHub/Tailscale login). The user may not be technical: explain each thing you ask them to do in one
+plain sentence.
 
 ## When to Use
 - The user gives you this folder, or asks to link/sync Hermes across devices, continue a chat on another
@@ -55,27 +59,46 @@ Step 0 - Explain and plan. Tell the user in 3-4 lines what they get (see README 
 (a) which devices and their OS, (b) a short unique name per device ("Laptop", "Desktop", "Phone"),
 (c) how they pay for AI. Done when you have the device list and names.
 
-Step 1 - Install the skill. If you only have the GitHub link, download
+Step 0b - Inventory (do this BEFORE installing anything). Run these checks with `terminal` and keep
+the results; every later step starts with "skip if the inventory says it is done":
+- Already linked? `$HERMES_HOME/hermes-sync.json` exists -> this device is already set up: run
+  `python <data_dir>/scripts/sync.py`, report the warnings and fix only those. Do NOT rerun the procedure.
+- Skill installed? `$HERMES_HOME/skills/hermes-device-sync/SKILL.md`.
+- Tools: `git --version`, `gh --version`, `python --version` (or the Hermes Python).
+- GitHub: `gh auth status` (logged in? which account?). Existing sync repo: `gh repo list --limit 200`
+  and, for a likely candidate, `gh api repos/<owner>/<repo>/contents/hermes-sync` (exists = another
+  device already set it up -> follow "every other device" instead). Existing local clone: look for a
+  folder with `hermes-sync/scripts/sync.py` in the home folder.
+- Hermes: `hermes --version`, `hermes auth list` (AI accounts), `hermes config get model.default`,
+  `hermes config get fallback_providers`, `hermes cron list` (a `hermes-sync` job already?),
+  `hermes gateway status`.
+- Optional parts: `tailscale status` (installed? logged in? which tailnet?), SSH server listening on 22.
+Show the user a short summary ("already have: ..., missing: ...") and only then continue.
+
+Step 1 - Install the skill (skip if already installed). If you only have the GitHub link, download
 `https://github.com/franzmoniz/hermes-device-sync/archive/refs/heads/main.zip` (works without git:
 `curl -L -o hds.zip <url>` or PowerShell `Invoke-WebRequest <url> -OutFile hds.zip`) and unzip it.
 Copy this folder to `$HERMES_HOME/skills/hermes-device-sync/` (Windows:
 `%LOCALAPPDATA%\hermes\skills\hermes-device-sync\`) if it is not there. Done when SKILL.md exists there.
 
-Step 2 - Tools. Check with `terminal`: `git --version`, `gh --version`. Install what is missing:
+Step 2 - Tools (only the ones the inventory found missing):
 - Windows: `winget install --id Git.Git -e` and `winget install --id GitHub.cli -e` (then open a new terminal)
 - macOS: `brew install git gh`   - Debian/Ubuntu: `sudo apt install git gh`   - Termux: `pkg install git gh python openssh`
 Done when both commands print a version.
 
-Step 3 - GitHub account. Ask if they have one. If not: they create it at https://github.com/signup (free).
-Then `gh auth login --hostname github.com --git-protocol https --web` and tell them to open the link and
+Step 3 - GitHub (skip the parts already done). If `gh auth status` already shows a login, use it (confirm
+the account with the user). Otherwise ask if they have an account; if not, they create one at
+https://github.com/signup (free). Then `gh auth login --hostname github.com --git-protocol https --web` and tell them to open the link and
 type the code shown. Then `gh auth setup-git` (git then uses gh's token, which also works over SSH and
-from cron without prompts). Done when `gh auth status` shows them logged in.
+from cron without prompts; harmless if already configured). Done when `gh auth status` shows them logged in.
 
-Step 4 - Private repo. Ask for a name (default `hermes-sync`). `gh repo create <name> --private`, then
-`gh repo clone <name> <home>/<name>`. If they already have a private repo they want to reuse (e.g. notes),
+Step 4 - Private repo. If the inventory found a sync repo or a local clone, reuse it (and `git pull`).
+Otherwise ask for a name (default `hermes-sync`), check it does not exist (`gh repo view <name>`), then
+`gh repo create <name> --private` and `gh repo clone <name> <home>/<name>`. If they already have a private repo they want to reuse (e.g. notes),
 that works too: the tool lives in a subfolder. Done when the clone exists. NEVER make it public.
 
-Step 5 - Run setup. `python <this folder>/scripts/setup.py --repo <clone> --device "<name>"` using the
+Step 5 - Run setup (idempotent: safe if parts already exist; it keeps an existing cron job, replaces
+its own profile block instead of adding a second one, and never overwrites config.json). `python <this folder>/scripts/setup.py --repo <clone> --device "<name>"` using the
 Python that runs Hermes (`python` usually works; on Windows the Hermes venv Python is fine).
 It copies the tool into `<clone>/hermes-sync/`, writes the device config, the cron bootstrap, the
 `hermes` shell wrapper and the cron job, and does the first sync. Read every `setup:` and
@@ -83,7 +106,7 @@ It copies the tool into `<clone>/hermes-sync/`, writes the device config, the cr
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. Done when it ends with "first sync OK".
 
 Step 6 - Make sure cron runs. The 15-minute job only runs while the Hermes gateway runs. Check
-`hermes cron status` and `hermes gateway status`; if not installed: `hermes gateway install` (must be run in the user's own
+`hermes cron status` and `hermes gateway status`; if it is already installed/running, leave it. If not installed: `hermes gateway install` (must be run in the user's own
 desktop session, not over SSH) and start it. Done when `hermes cron list` shows `hermes-sync` and,
 after its next run, "Last run: ... ok".
 
@@ -101,12 +124,13 @@ Step 8 - Tell the user what is left: install on the other devices (next procedur
 exact prompt from README "Adding another device".
 
 ## Procedure: every other device
-1. Hermes must already be installed there. Steps 2 and 3 above (tools + `gh auth login` with the SAME
-   GitHub account + `gh auth setup-git`).
-2. `gh repo clone <name> <home>/<name>` - the tool is already inside it (`<clone>/hermes-sync/`), so this
+1. Hermes must already be installed there. Do Step 0b (inventory) here too, then Steps 2 and 3 only
+   for what is missing (`gh` must be logged in with the SAME GitHub account as the first device).
+2. If the repo is not cloned yet: `gh repo clone <name> <home>/<name>` (else `git pull` in it) - the tool is already inside it (`<clone>/hermes-sync/`), so this
    device does not need the original folder: copy `<clone>/hermes-sync/` to the skills dir (Step 1).
 3. `python <clone>/hermes-sync/scripts/setup.py --repo <clone> --device "<unique name>"`, then Step 6.
-4. AI accounts: the sync prints `... is missing AI accounts that <device> has: x, y`. For each, guide
+4. AI accounts: the sync prints `... is missing AI accounts that <device> has: x, y`. Only those are
+   missing (the others are already logged in; don't touch them). For each missing one, guide
    the user through `hermes auth add <provider>` (or `hermes model` / the provider's login). Plugins:
    some providers need a plugin first (e.g. GitHub Copilot: `hermes plugins install github-copilot`).
    Primary model: `hermes config set model.default <model>` / `model.provider` like the other device.
@@ -114,17 +138,19 @@ exact prompt from README "Adding another device".
 
 ## Optional: control one device from another (SSH)
 Only if the user wants it (e.g. "from the laptop at school, do X on my desktop at home").
-1. Same network only (home): no extra account. Anywhere: Tailscale (free personal plan). Each device:
+1. Same network only (home): no extra account. Anywhere: Tailscale (free personal plan). First check
+   `tailscale status` on each device: if it is already installed and logged in, don't reinstall or log in
+   again. Only where missing:
    install (Windows `winget install --id Tailscale.Tailscale -e`, macOS/Linux see tailscale.com/download),
    then `tailscale up` and log in with the SAME account on all devices. A device can be in only ONE
    tailnet at a time: if one is already in a work/team tailnet, explain the choice (move it, or join
    the user's devices to that tailnet, or ask the tailnet owner to share a machine) and let them decide.
    If the tailnet has machines of other people: `tailscale set --accept-routes=false` and rule 6.
-2. Target device needs an SSH server. Windows: elevated PowerShell
+2. Target device needs an SSH server (check first: something listening on port 22 = already there). Windows: elevated PowerShell
    `templates/windows-ssh-server.ps1 -AllowFrom <controller tailscale IP>` (firewall allows only the
    home LAN + those IPs). Linux: `sudo apt install openssh-server`. macOS: System Settings > Sharing >
    Remote Login. Phones: usually not a target.
-3. Controller: `python scripts/remote.py keygen`, sync. Target: sync, then
+3. Controller: `python scripts/remote.py keygen` (it does nothing if the key exists), sync. Target: sync, then
    `python scripts/remote.py authorize "<controller>"` (on Windows admin accounts it tells you to rerun
    the .ps1 with `-AuthorizeKey`). Sync again so addresses are fresh.
 4. Test from the controller: `remote.py check "<target>"` -> "online via ..."; then
